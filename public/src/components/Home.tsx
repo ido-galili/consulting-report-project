@@ -27,42 +27,80 @@ const companies = [
   { id: `VRM_10`, name: 'VelvetRide Mobility' },
 ];
 
+type ReportType = 'high-level' | 'detailed';
+
+interface ReportRequest {
+  companyId: string;
+  reportType: ReportType;
+}
+
+// The API returns { reportMarkdown, error } on failure; fall back to a generic
+// message when the body isn't that shape (e.g. the proxy can't reach the server).
+async function getErrorMessage(res: Response): Promise<string> {
+  try {
+    const data: { error?: string } = await res.json();
+    if (data.error) return `${data.error}. Please try again.`;
+  } catch {
+    // Body wasn't JSON.
+  }
+  return `Request failed (${res.status}). Please try again.`;
+}
+
 const ReportGenerator = observer(() => {
   const [companyId, setCompanyId] = useState<string | null>(null);
-  const [reportType, setReportType] = useState<'high-level' | 'detailed'>(
+  const [reportType, setReportType] = useState<ReportType>(
     'high-level'
   );
   const [markdown, setMarkdown] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set when the shown report came from the server cache; null otherwise.
+  // Keeps the request that produced it, so Refresh regenerates that report
+  // even if the form selection has changed since.
+  const [cachedReport, setCachedReport] = useState<
+    (ReportRequest & { generatedAt: string }) | null
+  >(null);
 
-  async function onGenerate(e: React.FormEvent) {
+  function onGenerate(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    setMarkdown('');
-
     if (!companyId) {
       setError('Please select a company.');
       return;
     }
+    generate({ companyId, reportType }, false);
+  }
+
+  // forceRefresh makes the server skip its report cache and call the LLM again.
+  async function generate(request: ReportRequest, forceRefresh: boolean) {
+    setError(null);
+    setMarkdown('');
+    setCachedReport(null);
 
     setLoading(true);
     try {
-      const company = companies.find((c) => c.id === companyId);
+      const company = companies.find((c) => c.id === request.companyId);
       const res = await fetch('/api/reports/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           companyName: company?.name,
-          companyId,
-          reportType,
+          companyId: request.companyId,
+          reportType: request.reportType,
+          forceRefresh,
         }),
       });
 
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error(await getErrorMessage(res));
 
-      const data: { reportMarkdown: string } = await res.json();
+      const data: {
+        reportMarkdown: string;
+        cached?: boolean;
+        generatedAt?: string;
+      } = await res.json();
       setMarkdown(data.reportMarkdown || '');
+      if (data.cached && data.generatedAt) {
+        setCachedReport({ ...request, generatedAt: data.generatedAt });
+      }
     } catch (err: any) {
       setError(err?.message || 'Something went wrong');
     } finally {
@@ -90,7 +128,7 @@ const ReportGenerator = observer(() => {
           <Radio.Group
             label=''
             value={reportType}
-            onChange={(val) => setReportType(val as 'high-level' | 'detailed')}
+            onChange={(val) => setReportType(val as ReportType)}
             mb='md'
           >
             <Group>
@@ -113,6 +151,22 @@ const ReportGenerator = observer(() => {
       </Paper>
 
       <Paper radius='md' p='lg' mt='lg'>
+        {cachedReport && (
+          <Group justify='space-between' mb='sm'>
+            <Text size='sm' c='dimmed'>
+              Loaded from cache (generated{' '}
+              {new Date(cachedReport.generatedAt).toLocaleTimeString()})
+            </Text>
+            <Button
+              size='xs'
+              variant='light'
+              disabled={loading}
+              onClick={() => generate(cachedReport, true)}
+            >
+              Refresh
+            </Button>
+          </Group>
+        )}
         {markdown ? (
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
         ) : (

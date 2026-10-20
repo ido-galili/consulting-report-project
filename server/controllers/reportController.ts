@@ -6,7 +6,8 @@ export const generateReport = async (
   res: Response
 ): Promise<void> => {
   try {
-    const { companyName, companyId, reportType } = req.body || {};
+    const { companyName, companyId, reportType, forceRefresh } =
+      req.body || {};
     if (!companyName || !companyId || !reportType) {
       res.status(400).json({
         reportMarkdown: '',
@@ -15,12 +16,13 @@ export const generateReport = async (
       return;
     }
 
-    const reportMarkdown = await generateReportMarkdown(
+    const { markdown, cached, generatedAt } = await generateReportMarkdown(
       companyName,
       companyId,
-      reportType
+      reportType,
+      forceRefresh === true
     );
-    res.status(200).json({ reportMarkdown });
+    res.status(200).json({ reportMarkdown: markdown, cached, generatedAt });
   } catch (error) {
     res.status(500).json({
       reportMarkdown: '',

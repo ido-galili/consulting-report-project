@@ -9,6 +9,7 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
+    "@google/genai": "^2.30.0",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "path": "^0.12.7",
